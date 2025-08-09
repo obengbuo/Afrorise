@@ -1,0 +1,228 @@
+Sweet — here’s a **copy‑paste prompt** you can drop into Replit’s AI (or any codegen assistant) to scaffold the **Afrorise** web app end‑to‑end.
+
+---
+
+# Build the “Afrorise” Web App (MVP + Ready to Extend)
+
+You are an expert full‑stack engineer. Create a production‑ready **web app** for **Afrorise**, a nonprofit platform that connects mentors with young professionals and supports career development.
+
+## Tech Stack (opinionated)
+
+* **Frontend:** Next.js 14 (App Router), TypeScript, Tailwind CSS, shadcn/ui, React Hook Form + Zod, TanStack Query
+* **Backend:** Next.js API routes (server actions where helpful) with **Prisma** ORM
+* **DB:** PostgreSQL
+* **Auth:** NextAuth (Auth.js) with email/password + Google; role-based access control (RBAC)
+* **Storage:** UploadThing or S3-compatible for resumes/headshots
+* **Payments/Donations (stub):** Stripe (test mode) — donations optional, keep togglable
+* **Email:** Resend (or Nodemailer fallback) for confirmations & notifications
+* **Scheduling:** Cal.com (preferred) or basic custom slot booking stored in DB
+* **Infra:** Render/Neon for quick dev OR Replit/Postgres; keep `.env.example` and `docker-compose.yml` for local dev
+
+## Core User Roles
+
+* **Mentee (default)**
+* **Mentor**
+* **Admin**
+
+## MVP Features
+
+1. **Auth & Profiles**
+
+   * Sign up/login, email verify, password reset.
+   * Profile fields:
+
+     * Common: name, email, location (city/country), headline, bio, skills \[string\[]], industries \[enum], LinkedIn URL, headshot.
+     * Mentor-only: availability windows, meeting link (Cal.com/Calendly), years of experience, specialties, languages.
+     * Mentee-only: school, school year, major, minor, current profession, target profession.
+2. **Mentor Directory & Matching**
+
+   * Search/filter mentors by industry, skill, language, availability, rating.
+   * “Quick Match” button: suggests top 5 mentors using a simple score (overlap in skills/industry + availability).
+3. **Booking**
+
+   * Book **mentorship sessions**, **resume review**, or **mock interview** with a mentor.
+   * Flow: select mentor → choose slot → confirm → email notifications to both sides → event created (store in DB; if Cal.com present, create event via link).
+4. **Project Collaboration**
+
+   * Create/join **private project rooms**: title, description, tags, industry, Git/Drive link.
+   * Role‑gated visibility (only members + admins).
+   * Basic Kanban: columns (Backlog, In Progress, Review, Done), tasks with assignees, due dates, comments.
+5. **Personal Assistance Outsourcing (Gig Board)**
+
+   * Post small tasks (e.g., “Need a virtual assistant for 5 hrs”): title, description, budget, tags, remote/onsite, contact method.
+   * Apply/express interest via in‑app message.
+6. **Messaging**
+
+   * Lightweight 1:1 mentor–mentee messages + project room threads. (Store in DB; real‑time optional via simple polling; design for websocket later.)
+7. **Admin Dashboard**
+
+   * Manage users/roles, approve mentors, moderate posts/projects, export CSVs, view analytics (counts, active users, bookings/week).
+
+## Data Model (Prisma schema sketch)
+
+Implement these entities and relations (you can refine as needed):
+
+* `User` (id, name, email, passwordHash, role enum: ADMIN|MENTOR|MENTEE, image, createdAt)
+* `Profile` (id, userId FK, location, headline, bio, skills string\[], industries enum\[], linkedin, yearsExperience Int?, languages string\[], mentorFields, menteeFields)
+* `Availability` (id, mentorId FK, dayOfWeek, startTime, endTime, timezone)
+* `Session` (id, mentorId FK, menteeId FK, type enum: MENTORSHIP|RESUME\_REVIEW|MOCK\_INTERVIEW, startsAt, endsAt, status enum: PENDING|CONFIRMED|CANCELLED, notes, externalCalendarUrl?)
+* `Project` (id, ownerId FK, title, description, tags string\[], repoUrl?, driveUrl?, visibility enum: PRIVATE|ORG)
+* `ProjectMember` (projectId FK, userId FK, role enum: OWNER|MAINTAINER|CONTRIBUTOR)
+* `Task` (id, projectId FK, title, description, status enum: BACKLOG|IN\_PROGRESS|REVIEW|DONE, assigneeId?, dueDate, labels string\[])
+* `Gig` (id, creatorId FK, title, description, budget Int?, currency, tags string\[], isRemote Boolean, location?, status enum: OPEN|CLOSED)
+* `GigApplication` (id, gigId FK, applicantId FK, message, createdAt)
+* `MessageThread` (id, isProjectThread Boolean, projectId?, participantIds string\[])
+* `Message` (id, threadId FK, senderId FK, content, createdAt)
+* `Review` (id, mentorId FK, menteeId FK, rating Int, comment, createdAt)
+* `AuditLog` (id, actorId, action, entity, entityId, createdAt)
+* `Donation` (optional: id, userId, amount, currency, status, stripePaymentIntentId)
+
+Include sensible indexes and cascade rules.
+
+## Pages / Routes (Next.js App Router)
+
+* `/` Landing: mission, CTA “Find a Mentor”, “Become a Mentor”, “Explore Projects”, “Post a Gig”
+* `/auth/*` Sign in/up, forgot/reset, verify
+* `/dashboard` (role‑aware)
+
+  * Mentee: upcoming sessions, recommended mentors, applications, projects
+  * Mentor: upcoming sessions, requests, availability editor, reviews
+  * Admin: stats, approvals, moderation
+* `/mentors` listing + filters
+* `/mentors/[id]` profile, reviews, availability → booking flow
+* `/book/[mentorId]` session type + slot picker + confirm
+* `/projects` list/create/join
+* `/projects/[id]` kanban + thread
+* `/gigs` list/create
+* `/gigs/[id]` detail + apply
+* `/messages` thread list + chat view
+* `/profile` edit profile (tabs: general, mentor, mentee, account)
+* `/admin` users, content moderation, exports
+* `/donate` (optional Stripe stub)
+
+## UI/UX
+
+* Use shadcn/ui for forms, modals, dropdowns, data table, tabs, toast.
+* Form validation with React Hook Form + Zod; show inline errors.
+* Empty states, loading states, optimistic updates where safe.
+* Mobile‑first responsive layouts.
+
+## Matching Logic (simple, server-side)
+
+Create a `matchMentors(menteeProfile)` util that scores mentors:
+
+* +3 per matching industry, +2 per matching skill, +1 per language match, +2 if availability overlaps next 7 days.
+  Return top 5 with reasons (`scoreBreakdown`) for transparency.
+
+## Booking Logic
+
+* If mentor has `calLink`, show “Book on Cal.com” inline; else use internal slot picker powered by `Availability`.
+* Store `Session` on confirm; send emails to both sides; add ICS file attachment.
+
+## Messaging
+
+* Create `MessageThread` automatically when mentee books a session or manually from profiles.
+* Polling every 5–10s for MVP; abstract for future WebSocket.
+
+## Admin
+
+* Approve mentor applications (checkbox on Profile: `isMentorApproved`).
+* Moderate gigs/projects (set CLOSED/ARCHIVED).
+* CSV export endpoints for users, sessions, projects.
+
+## Security & RBAC
+
+* Middleware to enforce role-based routes.
+* Server‑side zod validation for all API mutations.
+* Rate limit auth and messaging endpoints (simple in‑memory or Prisma-backed counter).
+
+## Seed Data
+
+* Create seed script with:
+
+  * 5 mentors across Health, Finance, STEM with sample availability
+  * 5 mentees
+  * 3 projects with tasks
+  * 3 gigs
+  * 10 reviews
+  * 1 admin
+
+## Developer Experience
+
+* Provide:
+
+  * `README.md` with setup/run/deploy
+  * `.env.example` keys for NEXTAUTH, DATABASE\_URL, RESEND, STRIPE, UPLOADTHING
+  * `docker-compose.yml` for Postgres + app
+  * `prisma/seed.ts` and migrations
+  * Basic unit tests for matching and booking utils (Vitest)
+  * ESLint + Prettier configs
+
+## API (examples)
+
+Create typed route handlers under `app/api/*`:
+
+* `POST /api/profile` (create/update)
+* `GET /api/mentors` (filters: industry\[], skills\[], language\[], ratingMin)
+* `POST /api/match` (returns top mentors + reasons)
+* `POST /api/sessions` (create booking)
+* `GET /api/sessions?role=mentor|mentee`
+* `POST /api/messages` (send), `GET /api/messages?threadId=...`
+* `POST /api/projects`, `POST /api/projects/[id]/tasks`
+* `POST /api/gigs`, `POST /api/gigs/[id]/apply`
+* `GET /api/admin/exports?type=users|sessions|projects`
+
+## Implementation Tasks
+
+1. Scaffold Next.js + Tailwind + shadcn/ui + Prisma + NextAuth; init Postgres; create `.env.example`.
+2. Implement Prisma schema, run migrations, add seed.
+3. Add auth pages and RBAC middleware; profile onboarding wizard after first login.
+4. Build Mentor Directory, Profile, Booking flow (w/ email notifications).
+5. Build Projects (list/detail with Kanban), Messaging, and Gig Board.
+6. Build Admin Dashboard (moderation + exports).
+7. Add tests for matching & booking utilities.
+8. Provide README with local run and Replit quick start.
+
+## Environment Variables (.env.example)
+
+```
+DATABASE_URL=
+NEXTAUTH_URL=http://localhost:3000
+NEXTAUTH_SECRET=
+GOOGLE_CLIENT_ID=
+GOOGLE_CLIENT_SECRET=
+RESEND_API_KEY=
+STRIPE_SECRET_KEY=
+STRIPE_WEBHOOK_SECRET=
+UPLOADTHING_TOKEN=
+CALCOM_ORG_ID= (optional)
+```
+
+## Deliverables
+
+* Full source code in a single Next.js repo
+* Prisma migrations & seed
+* README with:
+
+  * setup (local + Replit)
+  * environment config
+  * how to switch to external Postgres (Neon/Render)
+  * how to disable Stripe/Resend/UploadThing if not configured
+* Seeded demo credentials:
+
+  * admin: `admin@afrorise.test` / `Admin123!`
+  * mentor: `mentor1@afrorise.test` / `Mentor123!`
+  * mentee: `mentee1@afrorise.test` / `Mentee123!`
+
+## Nice-to-Haves (stretch if time allows)
+
+* Mermaid ER diagram in docs
+* CSV import for bulk mentors
+* Simple analytics charts on Admin (users over time, sessions per week)
+* Internationalization scaffold (next-intl)
+
+**Now generate the complete project with code, pages, API routes, Prisma schema & seed, and a thorough README.**
+
+---
+
+Want me to tailor this for AWS deployment (Amplify + RDS + S3) or tweak any features before you run it?
